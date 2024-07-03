@@ -1,0 +1,69 @@
+from flask import Flask, request, render_template_string
+import re
+import requests
+
+app = Flask(__name__)
+
+def extract_info(text):
+    lac_match = re.search(r'Lac:([0-9a-fA-F]+)\s([0-9a-fA-F]+)', text)
+    if lac_match:
+        lac_hex_part1 = lac_match.group(1)
+        lac_hex_part2 = lac_match.group(2)
+        LAC = int(lac_hex_part1, 16)
+        CID = int(lac_hex_part2, 16)
+        return LAC, CID
+    else:
+        raise ValueError("LAC information not found in text")
+
+def get_location(mcc, mnc, lac, cid, api_key):
+    url = f"http://opencellid.org/cell/get?key={api_key}&mcc={mcc}&mnc={mnc}&lac={lac}&cellid={cid}&format=json"
+    response = requests.get(url)
+    data = response.json()
+    if 'lat' in data and 'lon' in data:
+        return data['lat'], data['lon']
+    else:
+        raise ValueError("Location not found")
+
+def generate_google_maps_link(lat, lon):
+    return f"https://maps.google.com/maps?f=q&q={lat},{lon}&z=16"
+
+@app.route('/', methods=['GET', 'POST'])
+def index():
+    result = ""
+    map_embed = ""
+    if request.method == 'POST':
+        text = request.form['text']
+        api_key = 'pk.e72b163d778a60963a2f335764023709'
+        MCC = 432
+        MNC = 11
+        try:
+            LAC, CID = extract_info(text)
+            latitude, longitude = get_location(MCC, MNC, LAC, CID, api_key)
+            google_maps_link = generate_google_maps_link(latitude, longitude)
+            result = f"Google Maps link: <a href='{google_maps_link}' target='_blank'>{google_maps_link}</a>"
+            map_embed = f"<iframe width='600' height='450' src='https://maps.google.com/maps?q={latitude},{longitude}&z=16&output=embed'></iframe>"
+        except ValueError as e:
+            result = str(e)
+        except Exception as e:
+            result = f"An error occurred: {str(e)}"
+    return render_template_string('''
+        <!doctype html>
+        <html lang="en">
+          <head>
+            <meta charset="utf-8">
+            <title>Cell Location Finder</title>
+          </head>
+          <body>
+            <h1>Enter Cell Information</h1>
+            <form method="post">
+              <textarea name="text" rows="10" cols="50"></textarea><br>
+              <input type="submit" value="Submit">
+            </form>
+            <div>{{ result | safe }}</div>
+            <div>{{ map_embed | safe }}</div>
+          </body>
+        </html>
+    ''', result=result, map_embed=map_embed)
+
+if __name__ == '__main__':
+    app.run(host='0.0.0.0', port=5000)
